@@ -7,8 +7,8 @@ build_requires:
 configure_requires:
   Module::Build::Tiny: 0.014
 dynamic_config: 0
-generated_by: 'Dist::Milla version v1.0.0, Dist::Zilla version 4.300033, CPAN::Meta::Converter version 2.130880'
-license: bsd
+generated_by: 'Dist::Milla version v1.0.0, Dist::Zilla version 4.300033, CPAN::Meta::Converter version 2.120921'
+license: perl
 meta-spec:
   url: http://module-build.sourceforge.net/META-spec-v1.4.html
   version: 1.4
@@ -30,4 +30,4 @@ resources:
   bugtracker: https://github.com/bentglasstube/App-MPDJ/issues
   homepage: https://github.com/bentglasstube/App-MPDJ
   repository: https://github.com/bentglasstube/App-MPDJ.git
-version: 1.01
+version: 1.02
