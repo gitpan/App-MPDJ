@@ -3,7 +3,7 @@ package App::MPDJ;
 use strict;
 use warnings;
 use 5.010;
-our $VERSION = '1.00';
+our $VERSION = '1.01';
 
 use Audio::MPD;
 use Getopt::Long;
@@ -19,7 +19,7 @@ sub new {
     crossfade => 0,
     daemon    => 1,
     mpd       => undef,
-    mpd_conn  => undef,
+    mpd_conn  => 'localhost',
     verbose   => 0,
     @options
   }, $class;
@@ -155,7 +155,7 @@ Usage: mpdj [options]
 Options:
   --mpd           MPD connection string (password\@host:port)
   -v,--verbose    Turn on chatty output
-  --no-daemon     Turn of daemonizing
+  --no-daemon     Turn off daemonizing
   -b,--before     Number of songs to keep in playlist before current song
   -a,--after      Number of songs to keep in playlist after current song
   -x,--crossfade  Seconds of crossfading between songs.
