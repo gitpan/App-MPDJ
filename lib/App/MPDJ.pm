@@ -4,10 +4,10 @@ use strict;
 use warnings;
 use 5.010;
 
-our $VERSION = '1.04';
+our $VERSION = '1.05';
 
-use Audio::MPD;
 use Getopt::Long;
+use Net::MPD;
 use Proc::Daemon;
 
 sub new {
@@ -19,7 +19,6 @@ sub new {
     before     => 2,
     calls_path => 'calls',
     calls_freq => 3600,
-    crossfade  => 0,
     daemon     => 1,
     last_call  => 0,
     mpd        => undef,
@@ -59,22 +58,13 @@ sub parse_options {
     'mpd=s'          => \$self->{mpd_conn},
     'music-path=s'   => \$self->{music_path},
     'v|verbose!'     => \$self->{verbose},
-    'x|crossfade=i'  => \$self->{crossfade},
   );
 }
 
 sub connect {
   my ($self) = @_;
 
-  my $options = {};
-
-  my (@items) = ($self->{mpd_conn} =~ /^(?:([^@]+)@)?([^:]+)(?::(\d+))?$/);
-
-  $options->{password} = $items[0] if $items[0];
-  $options->{host}     = $items[1] if $items[1];
-  $options->{port}     = $items[2] if $items[2];
-
-  $self->{mpd} = Audio::MPD->new($options);
+  $self->{mpd} = Net::MPD->connect($self->{mpd_conn});
 }
 
 sub execute {
@@ -92,14 +82,17 @@ sub execute {
   $self->connect;
   $self->configure;
 
+  $self->mpd->subscribe('mpdj');
+
   while (1) {
-    $self->ensure_playing;
-    $self->remove_old_songs;
-    $self->add_new_songs;
+    $self->say('Waiting');
+    my @changes = $self->mpd->idle(qw(database player playlist message options));
+    $self->mpd->update_status();
 
-    $self->add_call if $self->time_for_call;
-
-    sleep 1;
+    foreach my $subsystem (@changes) {
+      my $function = $subsystem . '_changed';
+      $self->$function();
+    }
   }
 }
 
@@ -110,7 +103,6 @@ sub configure {
 
   $self->mpd->repeat(0);
   $self->mpd->random(0);
-  $self->mpd->fade($self->{crossfade});
 
   if ($self->{calls_freq}) {
     my $now = time;
@@ -119,33 +111,22 @@ sub configure {
   }
 }
 
-sub ensure_playing {
-  my ($self) = @_;
-
-  my $status = $self->mpd->status;
-  unless ($status->state eq 'play') {
-    $self->say('MPD not playing, enabling');
-
-    $self->add_song if $status->playlistlength == 0;
-    $self->mpd->play;
-  }
-}
-
 sub remove_old_songs {
   my ($self) = @_;
 
-  my $count = $self->mpd->status->song - $self->{before};
+  my $song = $self->mpd->song || 0;
+  my $count = $song - $self->{before};
   if ($count > 0) {
     $self->say("Deleting $count old songs");
-    $self->mpd->playlist->delete(0 .. $count - 1);
+    $self->mpd->delete("0:$count");
   }
 }
 
 sub add_new_songs {
   my ($self) = @_;
 
-  my $status = $self->mpd->status;
-  my $count = $self->{after} + $status->song - $status->playlistlength + 1;
+  my $song = $self->mpd->song || 0;
+  my $count = $self->{after} + $song - $self->mpd->playlist_length + 1;
   if ($count > 0) {
     $self->say("Adding $count new songs");
     $self->add_song for 1 .. $count;
@@ -164,28 +145,27 @@ sub add_call {
   $self->say('Injecting call');
 
   $self->add_random_item_from_path($self->{calls_path}, 'immediate');
-  $self->{last_call} = time;
+
+  my $now = time;
+  $self->{last_call} = $now - $now % $self->{calls_freq};
+  $self->say('Set last call to ' . $self->{last_call});
 }
 
 sub add_random_item_from_path {
   my ($self, $path, $next) = @_;
 
-  my @items = grep { $_->isa('Audio::MPD::Common::Item::Song') }
-    $self->mpd->collection->all_items_simple($path);
+  # TODO cache items
+  my @items = grep { $_->{type} eq 'file' } $self->mpd->list_all($path);
 
   my $index = int(rand(scalar @items));
   my $item = $items[$index];
 
-  $self->say('Adding ' . $item->file);
+  my $uri = $item->{uri};
+  my $song = $self->mpd->song || 0;
+  my $pos  = $next ? $song + 1 : $self->mpd->playlist_length;
+  $self->say('Adding ' . $uri . ' at position ' . $pos);
 
-  my $playlist = $self->mpd->playlist;
-
-  $playlist->add($item->file);
-
-  if ($next) {
-    my $status = $self->mpd->status;
-    $playlist->move($status->playlistlength - 1, $status->song + 1);
-  }
+  $self->mpd->add_id($uri, $pos);
 }
 
 sub time_for_call {
@@ -216,10 +196,62 @@ Options:
   -c,--calls-freq   Frequency to inject call signs in seconds
   --calls-path      Path to call sign files
   --music-path      Path to music files
-  -x,--crossfade    Seconds of crossfading between songs
   -V,--version      Show version information and exit
   -h,--help         Show this help and exit
 HELP
+}
+
+sub database_changed {
+  my ($self) = @_;
+
+  # TODO update cached file lists
+}
+
+sub player_changed {
+  my ($self) = @_;
+
+  $self->add_call() if $self->time_for_call();
+  $self->add_new_songs();
+  $self->remove_old_songs();
+}
+
+sub playlist_changed {
+  my ($self) = @_;
+
+  $self->player_changed();
+}
+
+sub message_changed {
+  my $self = shift;
+
+  my @messages = $self->mpd->read_messages();
+
+  foreach my $message (@messages) {
+    my $function = 'handle_message_' . $message->{channel};
+    $self->$function($message->{message});
+  }
+}
+
+sub options_changed {
+  my $self = shift;
+
+  $self->say('Resetting configuration');
+
+  $self->mpd->repeat(0);
+  $self->mpd->random(0);
+}
+
+sub handle_message_mpdj {
+  my ($self, $message) = @_;
+
+  my ($option, $value) = split /\s+/, $message, 2;
+
+  if ($option =~ /^(?:before|after|calls_freq)$/) {
+    return unless $value =~ /^\d+$/;
+    $self->say('Setting ' . $option . ' to ' . $value);
+    $self->{$option} = $value;
+    $self->player_changed();
+  }
 }
 
 1;
@@ -235,7 +267,7 @@ App::MPDJ - MPD DJ.
 =head1 SYNOPSIS
 
   > mpdj
-  > mpdj --before 2 --after 6 --crossfade 5
+  > mpdj --before 2 --after 6
   > mpdj --no-daemon --verbose
 
 =head1 DESCRIPTION
@@ -282,11 +314,6 @@ Path to call sign files.  The default is 'calls'.
 =item --music-path
 
 Path to music files.  The default is 'music'.
-
-=item -x, --crossfade
-
-Set the seconds of crossfade to use.  The default is 0 seconds which means no
-crossfading will happen.
 
 =item -V, --version
 
