@@ -4,7 +4,7 @@ NAME
 SYNOPSIS
       > mpdj
       > mpdj --before 2 --after 6
-      > mpdj --no-daemon --verbose
+      > mpdj --no-daemon --conlog info
 
 DESCRIPTION
     "App::MPDJ" is an automatic DJ for your "MPD" server. It will manage a
@@ -46,11 +46,22 @@ OPTIONS
     --music-path
         Path to music files. The default is 'music'.
 
+    -f --conf
+        Config file to use
+
     -V, --version
         Show the current version of the script installed and exit.
 
     -h, --help
         Show this help and exit.
+
+CONFIGURATION FILES
+    The configuration file is formatted as an INI file. See AppConfig for
+    details. If no configuration file is given, the file "/etc/mpdj.conf"
+    will be read (if it exists) followed by the file "~/.mpdjrc" (if it
+    exists). The values in the latter file will override anything in the
+    first file. Command line parameters will override anything given in any
+    configuration file.
 
 AUTHOR
     Alan Berndt <alan@eatabrick.org>
