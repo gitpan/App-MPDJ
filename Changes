@@ -1,5 +1,8 @@
 Revision history for App-MPDJ
 
+1.09  2014-04-21 15:47:40 MST
+        - Change license to MIT
+
 1.08  2014-04-13 07:42:18 MST
         - Implement configuration files
 
